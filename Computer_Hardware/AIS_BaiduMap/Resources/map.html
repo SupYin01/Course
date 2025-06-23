@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <title>AIS船舶跟踪地图</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            overflow: hidden;
+        }
+
+        #map_container {
+            height: 100%;
+            width: 100%;
+        }
+    </style>
+    <script type="text/javascript"
+        src="https://api.map.baidu.com/api?v=3.0&ak=pLik9yt1mQqgySIoGKOmvf9plouGEuKy"></script>
+</head>
+
+<body>
+    <div id="map_container"></div>
+    <script>
+        let map = null;
+        const shipMarkers = new Map();
+        // 使用本地资源中的图标
+        const SHIP_ICON_URL = "qrc:/Resources/boat.png";
+
+        function initMap() {
+            map = new BMap.Map("map_container");
+            // 设置上海港附近的默认视角
+            map.centerAndZoom(new BMap.Point(122.311858, 30.68028), 11);
+            map.enableScrollWheelZoom();
+            map.addControl(new BMap.NavigationControl());
+
+            // 调试函数
+            window.debug = {
+                testMarker: function () {
+                    const marker = new BMap.Marker(new BMap.Point(122.311858, 30.68028));
+                    map.addOverlay(marker);
+                    console.log("测试标记已添加");
+                },
+                clearAll: function () {
+                    shipMarkers.forEach(marker => map.removeOverlay(marker));
+                    shipMarkers.clear();
+                    console.log("已清除所有标记");
+                }
+            };
+
+            // 确保地图完全加载
+            map.addEventListener("tilesloaded", function () {
+                console.log("地图瓦片加载完成");
+            });
+        }
+
+        // 暴露给Qt调用的函数
+        // 修改updateShipMarkers函数
+        window.updateShipMarkers = function (ships) {
+            console.log("接收到船舶数据:", ships);
+
+            // 先收集需要删除的MMSI
+            const toDelete = new Set(shipMarkers.keys());
+
+            ships.forEach(ship => {
+                // 验证坐标有效性
+                if (!ship.lng || !ship.lat ||
+                    Math.abs(ship.lng) > 180 ||
+                    Math.abs(ship.lat) > 90) {
+                    console.warn("无效坐标被跳过:", ship);
+                    return;
+                }
+
+                const point = new BMap.Point(ship.lng, ship.lat);
+                const icon = new BMap.Icon(SHIP_ICON_URL, new BMap.Size(24, 24), {
+                    anchor: new BMap.Size(12, 12),
+                    imageSize: new BMap.Size(24, 24)
+                });
+
+                let marker = shipMarkers.get(ship.mmsi);
+                if (marker) {
+                    // 更新现有标记
+                    marker.setPosition(point);
+                    marker.setIcon(icon);
+                    if (ship.cog) marker.setRotation(ship.cog);
+                    toDelete.delete(ship.mmsi); // 保留这个标记
+                } else {
+                    // 创建新标记
+                    marker = new BMap.Marker(point, { icon: icon });
+                    if (ship.cog) marker.setRotation(ship.cog);
+                    map.addOverlay(marker);
+                    shipMarkers.set(ship.mmsi, marker);
+
+                    // 添加点击事件 - 只添加一次
+                    marker.addEventListener("click", function () {
+                        const info = `
+                    <div style="max-width:300px;font-family:Arial;">
+                        <h3 style="margin:5px 0;color:#1E90FF;">船舶详细信息</h3>
+                        <p><b>MMSI:</b> ${ship.mmsi}</p>
+                        <p><b>名称:</b> ${ship.name || '未知'}</p>
+                        <p><b>位置:</b> ${ship.lat.toFixed(6)}°N, ${ship.lng.toFixed(6)}°E</p>
+                        <p><b>航向:</b> ${ship.cog || '未知'}°</p>
+                        <hr style="margin:8px 0;border:0;border-top:1px solid #ddd;">
+                    </div>
+                `;
+                        const infoWindow = new BMap.InfoWindow(info, {
+                            width: 320,
+                            title: "船舶信息"
+                        });
+                        marker.openInfoWindow(infoWindow);
+
+                        // Notify Qt
+                        if (window.qtObject) {
+                            qtObject.handleWebPageMessage({
+                                action: "ship_clicked",
+                                mmsi: ship.mmsi
+                            });
+                        }
+                    });
+                }
+            });
+
+            // 删除不再需要的标记
+            toDelete.forEach(mmsi => {
+                const marker = shipMarkers.get(mmsi);
+                if (marker) {
+                    map.removeOverlay(marker);
+                    shipMarkers.delete(mmsi);
+                }
+            });
+        };
+
+        function clearAllMarkers() {
+            // 遍历所有覆盖物并删除
+            if (window.allMarkers && window.allMarkers.length > 0) {
+                for (let i = 0; i < window.allMarkers.length; i++) {
+                    map.removeOverlay(window.allMarkers[i]);
+                }
+                window.allMarkers = []; // 清空数组
+            }
+            console.log("已清除所有标记");
+        }
+
+        window.onload = initMap;
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/">
+        <file>Resources/messages.txt</file>
+        <file>Resources/boat.png</file>
+        <file>Resources/map.html</file>
+    </qresource>
+</RCC>
